@@ -99,6 +99,14 @@ class CollageViewModel(private val app: Application) : AndroidViewModel(app) {
     val pinchEnabled: StateFlow<Boolean> = _pinchEnabled.asStateFlow()
     private val _introSeen = MutableStateFlow(gestureSettings.introSeen)
     val introSeen: StateFlow<Boolean> = _introSeen.asStateFlow()
+    private val _sensitivity = MutableStateFlow(gestureSettings.zoomSensitivity)
+    val zoomSensitivity: StateFlow<Float> = _sensitivity.asStateFlow()
+    private val _frameTiming = MutableStateFlow(gestureSettings.showFrameTiming)
+    val frameTiming: StateFlow<Boolean> = _frameTiming.asStateFlow()
+
+    /** Live (uncommitted) crop of the photo being dragged; see [LiveGesture]. */
+    val live = LiveGesture()
+    val liveRenderer: CollageRenderer get() = renderer
     private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
 
@@ -154,6 +162,8 @@ class CollageViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun setTouchMode(m: TouchMode) { _touchMode.value = m; gestureSettings.mode = m }
     fun setPinchEnabled(on: Boolean) { _pinchEnabled.value = on; gestureSettings.pinchEnabled = on }
+    fun setZoomSensitivity(v: Float) { val c = com.mundymorning.touchgesture.OneFingerMath.clampSensitivity(v); _sensitivity.value = c; gestureSettings.zoomSensitivity = c }
+    fun setFrameTiming(on: Boolean) { _frameTiming.value = on; gestureSettings.showFrameTiming = on }
     fun markIntroSeen() { _introSeen.value = true; gestureSettings.introSeen = true }
 
     fun deleteProject(id: String) {
@@ -317,7 +327,37 @@ class CollageViewModel(private val app: Application) : AndroidViewModel(app) {
     private fun mergeFaces(p: CollageProject): CollageProject =
         p.copy(cells = p.cells.map { c -> c.photo?.let { c.copy(photo = withCachedFaces(it)) } ?: c })
 
-    fun selectCell(i: Int?) { _selection.value = Selection(cell = i) }
+    fun selectCell(i: Int?) {
+        _selection.value = Selection(cell = i)
+        if (i != null) prefetchLive(i)
+    }
+
+    /** Longest side (px) of the bitmap used for live dragging: sharp enough to zoom, small enough to stay GPU-friendly. */
+    private fun liveSample(ref: PhotoRef): Int {
+        var s = 1
+        val long = maxOf(ref.width, ref.height)
+        while (long / s > LIVE_MAX_SIDE) s *= 2
+        return s
+    }
+
+    /**
+     * Bitmap for live dragging of cell [index]; cached, so after [prefetchLive] it costs nothing. Decoding here
+     * (cache miss) is the only blocking work a gesture can ever trigger, and only once per photo.
+     */
+    fun liveBitmap(index: Int): Bitmap? {
+        val ref = _project.value?.cells?.getOrNull(index)?.photo ?: return null
+        return provider.get(ref, liveSample(ref))
+    }
+
+    private fun prefetchLive(index: Int) {
+        val ref = _project.value?.cells?.getOrNull(index)?.photo ?: return
+        viewModelScope.launch(Dispatchers.Default) { provider.get(ref, liveSample(ref)) }
+    }
+
+    /** Commit the final crop of a drag/zoom as one undoable edit. Full float precision, no rounding. */
+    fun commitCrop(index: Int, zoom: Float, cx: Float, cy: Float) {
+        edit { p -> p.copy(cells = p.cells.mapIndexed { i, c -> if (i == index) c.copy(zoom = zoom, cx = cx, cy = cy, manual = true) else c }) }
+    }
     fun selectText(i: Int?) { _selection.value = Selection(text = i) }
 
     // ---------------------------------------------------------------- face detection
@@ -547,6 +587,8 @@ class CollageViewModel(private val app: Application) : AndroidViewModel(app) {
     private fun emit(e: UiEvent) { _events.tryEmit(e) }
 
     companion object {
+        const val LIVE_MAX_SIDE = 2048
+
         fun fitInside(availW: Int, availH: Int, aspect: Float): Pair<Int, Int> {
             var w = availW.toFloat()
             var h = w / aspect

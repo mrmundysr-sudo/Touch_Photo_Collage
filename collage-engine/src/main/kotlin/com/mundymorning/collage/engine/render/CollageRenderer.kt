@@ -75,6 +75,24 @@ class CollageRenderer(private val provider: BitmapProvider) {
         val bmp = provider.get(ref, CropMath.sampleFor(pxPerSrc))
         if (bmp == null) { drawBroken(canvas, dest, radius); return }
         try {
+            paintCell(canvas, bmp, cell, rect, project, unit, allowSharpen = true)
+        } finally {
+            provider.release(bmp)
+        }
+    }
+
+    /**
+     * Paints one photo cell from an already decoded bitmap (any sample size). Used by [drawCell] and by live
+     * gesture drawing, so what you see while dragging is exactly what is rendered afterwards.
+     */
+    private fun paintCell(canvas: Canvas, bmp: Bitmap, cell: CellEdit, rect: FRect, project: CollageProject, unit: Float, allowSharpen: Boolean) {
+        val ref = cell.photo ?: return
+        val disp = Orientation.displaySize(ref.width, ref.height, ref.exif, cell.rotation)
+        val region = CropMath.region(disp.aspect, rect.w / rect.h, cell.zoom, cell.cx, cell.cy, cell.fit)
+        val part = CropMath.photoPart(region)
+        val dest = CropMath.destRect(region, rect)
+        val radius = min(project.style.cornerRadius * unit, min(dest.w, dest.h) / 2f)
+        run {
             val aff = Orientation.totalAffine(bmp.width, bmp.height, ref.exif, cell.rotation, cell.mirror)
             val dw = Orientation.displaySize(bmp.width, bmp.height, ref.exif, cell.rotation)
             val sx = dest.w / (part.w * dw.w)
@@ -91,7 +109,7 @@ class CollageRenderer(private val provider: BitmapProvider) {
             }
             val rf = RectF(dest.l, dest.t, dest.r, dest.b)
 
-            if (cell.adjustments.sharpness > 0.001f && drawSharpened(canvas, bmp, matrix, paint, rf, radius, cell.adjustments.sharpness)) {
+            if (allowSharpen && cell.adjustments.sharpness > 0.001f && drawSharpened(canvas, bmp, matrix, paint, rf, radius, cell.adjustments.sharpness)) {
                 // done
             } else {
                 paint.shader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also { it.setLocalMatrix(matrix) }
@@ -109,9 +127,28 @@ class CollageRenderer(private val provider: BitmapProvider) {
                 )
             }
             if (!cell.caption.isBlank) drawCaption(canvas, cell.caption.display(), rf, radius)
-        } finally {
-            provider.release(bmp)
         }
+    }
+
+    /**
+     * Repaints a single cell (background, photo, border, caption and text overlays) onto [canvas], typically a
+     * hardware canvas, using the live crop in [cell]. Nothing is decoded, no bitmap is allocated and the project is
+     * not touched, which makes it cheap enough to run every display frame while a finger is dragging.
+     * Sharpening is skipped while live (it is applied by the final render).
+     */
+    fun drawCellLive(canvas: Canvas, project: CollageProject, index: Int, cell: CellEdit, bmp: Bitmap, width: Int, height: Int) {
+        val rect = cellRects(project, width, height).getOrNull(index) ?: return
+        val unit = LayoutEngine.unit(width.toFloat(), height.toFloat())
+        canvas.save()
+        canvas.clipRect(rect.l, rect.t, rect.r, rect.b)
+        if (project.background.type == com.mundymorning.collage.engine.project.BackgroundType.TRANSPARENT) {
+            canvas.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR)
+        } else {
+            BackgroundPainter.draw(canvas, width, height, project.background, keepTransparent = true)
+        }
+        paintCell(canvas, bmp, cell, rect, project, unit, allowSharpen = false)
+        project.texts.forEach { drawText(canvas, it, width, height) }
+        canvas.restore()
     }
 
     /** Colour-correct into a cell-sized temp bitmap, sharpen, then draw with the rounded mask. */

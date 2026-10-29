@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,7 +57,7 @@ fun GestureModeBar(
     hasTarget: Boolean,
     onHelp: () -> Unit,
     modifier: Modifier = Modifier,
-    zoomLabel: String? = null,
+    zoomLabel: () -> String? = { null },
 ) {
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -84,10 +86,17 @@ fun GestureModeBar(
         ) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(mode.instruction(hasTarget), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                if (zoomLabel != null && hasTarget) Text(zoomLabel, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                if (hasTarget) ZoomReadout(zoomLabel)
             }
         }
     }
+}
+
+/** Isolated so that per-frame zoom changes recompose only this tiny text, never the bar or the screen. */
+@Composable
+private fun ZoomReadout(label: () -> String?) {
+    val t = label()
+    if (t != null) Text(t, fontWeight = FontWeight.Bold, fontSize = 14.sp)
 }
 
 private val TightPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 4.dp)
@@ -101,25 +110,54 @@ private fun ModeLabel(glyph: String, label: String) {
     }
 }
 
-/** Short first-use explanation, with the pinch preference. */
+/** First-use explanation plus the touch preferences: pinch, zoom sensitivity and the optional frame-timing readout. */
 @Composable
-fun GestureIntroDialog(pinchEnabled: Boolean, onPinchChange: (Boolean) -> Unit, onDismiss: () -> Unit) {
+fun GestureIntroDialog(
+    pinchEnabled: Boolean,
+    onPinchChange: (Boolean) -> Unit,
+    sensitivity: Float,
+    onSensitivityChange: (Float) -> Unit,
+    frameTiming: Boolean,
+    onFrameTimingChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Move and zoom with one finger") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("1. Tap a photo to choose it.")
                 Text("2. Pick PAN or ZOOM under the picture. The bar always tells you what your finger will do.")
                 Text("3. PAN: drag one finger anywhere to move the photo.")
                 Text("4. ZOOM: slide one finger up to zoom in, down to zoom out. Tiny movements make tiny changes.")
                 Text("5. RESET puts the photo back where the app first placed it.")
+                Column {
+                    Text("Zoom sensitivity: ${"%.1f".format(sensitivity)}×", fontWeight = FontWeight.SemiBold)
+                    androidx.compose.material3.Slider(
+                        value = OneFingerMath.sliderFromSensitivity(sensitivity),
+                        onValueChange = { onSensitivityChange(OneFingerMath.sensitivityFromSlider(it)) },
+                        modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Zoom sensitivity ${"%.1f".format(sensitivity)} times" },
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton({ onSensitivityChange(OneFingerMath.SENSITIVITY_FINE) }, Modifier.heightIn(min = 48.dp)) { Text("Fine") }
+                        OutlinedButton({ onSensitivityChange(OneFingerMath.SENSITIVITY_DEFAULT) }, Modifier.heightIn(min = 48.dp)) { Text("Normal") }
+                        OutlinedButton({ onSensitivityChange(2f) }, Modifier.heightIn(min = 48.dp)) { Text("Fast") }
+                    }
+                    Text("Lower is finer: more finger travel for the same zoom.", fontSize = 12.sp)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Also allow two-finger pinch", fontWeight = FontWeight.SemiBold)
                         Text("You can change this any time with the ? button.", fontSize = 12.sp)
                     }
                     Switch(pinchEnabled, onPinchChange)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Show frame timing", fontWeight = FontWeight.SemiBold)
+                        Text("For testing smoothness: shows fps and slowest frame.", fontSize = 12.sp)
+                    }
+                    Switch(frameTiming, onFrameTimingChange)
                 }
             }
         },

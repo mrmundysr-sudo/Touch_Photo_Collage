@@ -99,7 +99,13 @@ object BackgroundPainter {
     private fun withAlpha(c: Int, a: Int) = (c and 0x00FFFFFF) or (a shl 24)
 
     /** Deterministic 128px noise tile so exports look identical every time. */
-    private fun noiseTile(ink: Int, maxAlpha: Int): Bitmap {
+    private val tiles = HashMap<Long, Bitmap>()
+
+    private fun noiseTile(ink: Int, maxAlpha: Int): Bitmap = synchronized(tiles) {
+        tiles.getOrPut(ink.toLong() * 256L + maxAlpha) { makeNoiseTile(ink, maxAlpha) }
+    }
+
+    private fun makeNoiseTile(ink: Int, maxAlpha: Int): Bitmap {
         val n = 128
         val rnd = java.util.Random(42)
         val px = IntArray(n * n) { withAlpha(ink, rnd.nextInt(maxAlpha)) }

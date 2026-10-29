@@ -81,6 +81,9 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
     val touchMode by vm.touchMode.collectAsState()
     val pinch by vm.pinchEnabled.collectAsState()
     val introSeen by vm.introSeen.collectAsState()
+    val sensitivity by vm.zoomSensitivity.collectAsState()
+    val frameTiming by vm.frameTiming.collectAsState()
+    val live = vm.live
     var help by remember { mutableStateOf(false) }
     val p = project ?: return
 
@@ -131,17 +134,15 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
                         onZoomStep = { f -> selection.cell?.let { vm.stepCell(it, 0f, 0f, f) } },
                         onPanStep = { dx, dy -> selection.cell?.let { vm.stepCell(it, dx, dy, 1f) } },
                         onReset = { selection.cell?.let { vm.resetCell(it) } },
+                        live = live, renderer = vm.liveRenderer, liveBitmap = vm::liveBitmap, onCommit = vm::commitCrop, sensitivity = sensitivity,
                     )
                 }
             }
             val selCell = selection.cell?.let { p.cells.getOrNull(it) }?.takeIf { it.photo != null }
             if (selCell != null) {
-                Text(
-                    "${touchMode.glyph} ${touchMode.label}  ×${"%.1f".format(selCell.zoom)}", style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.align(Alignment.TopStart).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary).padding(horizontal = 12.dp, vertical = 6.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
+                ModeBadge(Modifier.align(Alignment.TopStart), touchMode, live, selection.cell ?: -1, selCell.zoom)
             }
+            if (frameTiming) com.mundymorning.touchgesture.FrameTimingOverlay(Modifier.align(Alignment.BottomCenter))
             if (facesPending > 0) {
                 Text(
                     "Finding faces…", style = MaterialTheme.typography.labelMedium,
@@ -156,7 +157,7 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
         GestureModeBar(
             mode = touchMode, onModeChange = vm::setTouchMode, onReset = { selection.cell?.let { vm.resetCell(it) } },
             hasTarget = selectedCell != null, onHelp = { help = true },
-            zoomLabel = selectedCell?.let { "×${"%.1f".format(it.zoom)}" },
+            zoomLabel = { selectedCell?.let { c -> "×${"%.1f".format(if (live.active && live.index == selection.cell) live.zoom else c.zoom)}" } },
         )
         Spacer(Modifier.height(4.dp))
 
@@ -213,7 +214,7 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
     }
 
     if (!introSeen || help) {
-        GestureIntroDialog(pinch, vm::setPinchEnabled) { vm.markIntroSeen(); help = false }
+        GestureIntroDialog(pinch, vm::setPinchEnabled, sensitivity, vm::setZoomSensitivity, frameTiming, vm::setFrameTiming) { vm.markIntroSeen(); help = false }
     }
 
     if (renaming) {
@@ -226,6 +227,17 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
             dismissButton = { TextButton({ renaming = false }) { Text("Cancel") } },
         )
     }
+}
+
+/** Reads the live zoom itself, so per-frame zoom changes recompose only this badge. */
+@Composable
+private fun ModeBadge(modifier: Modifier, mode: com.mundymorning.touchgesture.TouchMode, live: com.mundymorning.touchphotocollage.LiveGesture, cell: Int, committedZoom: Float) {
+    val z = if (live.active && live.index == cell) live.zoom else committedZoom
+    Text(
+        "${mode.glyph} ${mode.label}  ×${"%.1f".format(z)}", style = MaterialTheme.typography.labelLarge,
+        modifier = modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary).padding(horizontal = 12.dp, vertical = 6.dp),
+        color = MaterialTheme.colorScheme.onPrimary,
+    )
 }
 
 @Composable

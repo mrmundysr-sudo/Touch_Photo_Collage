@@ -6,6 +6,17 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.graphicsLayer
+import android.graphics.Bitmap
+import com.mundymorning.collage.engine.transform.Orientation
+import com.mundymorning.touchgesture.GestureOutcome
+import com.mundymorning.touchgesture.OneFingerMath
+import com.mundymorning.touchgesture.touchGesture
+import com.mundymorning.touchphotocollage.LiveGesture
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -38,10 +49,7 @@ import com.mundymorning.collage.engine.project.BackgroundType
 import com.mundymorning.collage.engine.project.CollageProject
 import com.mundymorning.collage.engine.render.CollageRenderer
 import com.mundymorning.touchgesture.TouchMode
-import com.mundymorning.touchgesture.TouchStart
-import com.mundymorning.touchgesture.classifyTouchStart
 import com.mundymorning.touchgesture.label
-import com.mundymorning.touchgesture.oneFingerOrPinchGesture
 import com.mundymorning.touchphotocollage.PreviewFrame
 import com.mundymorning.touchphotocollage.Selection
 
@@ -67,6 +75,11 @@ fun CollageCanvas(
     onZoomStep: (Float) -> Unit,
     onPanStep: (Float, Float) -> Unit,
     onReset: () -> Unit,
+    live: LiveGesture,
+    renderer: CollageRenderer,
+    liveBitmap: (Int) -> Bitmap?,
+    onCommit: (index: Int, zoom: Float, cx: Float, cy: Float) -> Unit,
+    sensitivity: Float,
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -75,6 +88,9 @@ fun CollageCanvas(
     val frameState = rememberUpdatedState(frame)
     val projectState = rememberUpdatedState(project)
     val modeState = rememberUpdatedState(mode)
+    val sensState = rememberUpdatedState(sensitivity)
+    val liveBitmapState = rememberUpdatedState(liveBitmap)
+    val onCommitState = rememberUpdatedState(onCommit)
     val pinchState = rememberUpdatedState(pinchEnabled)
     var dragFrom by remember { mutableStateOf<Int?>(null) }
     var dragPos by remember { mutableStateOf(Offset.Zero) }
@@ -117,37 +133,53 @@ fun CollageCanvas(
                     if (idx < 0) { onSelectCell(null); return@awaitEachGesture }
                     onSelectCell(idx)
                     val cell = projectState.value.cells.getOrNull(idx)
-                    if (cell?.photo == null) return@awaitEachGesture
+                    val photo = cell?.photo ?: return@awaitEachGesture
+                    val fit = cell.fit
+                    val imgAspect = Orientation.displaySize(photo.width, photo.height, photo.exif, cell.rotation).aspect
+                    var fallback = false
 
-                    var startDelta = Offset.Zero
-                    val kind = classifyTouchStart(down) { startDelta = it }
-                    if (kind == TouchStart.TAP) return@awaitEachGesture
-                    if (kind == TouchStart.LONG_PRESS) {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        dragFrom = idx; dragPos = start
-                        drag(down.id) { ch -> ch.consume(); dragPos = ch.position }
-                        val to = rectsState.value.indexOfFirst { it.contains(dragPos.x, dragPos.y) }
-                        dragFrom = null
-                        if (to >= 0 && to != idx) onSwap(idx, to)
-                        return@awaitEachGesture
-                    }
-                    // one-finger PAN / ZOOM (Touch Gesture Standard) or optional pinch
-                    val perDoubling = 160.dp.toPx()
-                    val moved = oneFingerOrPinchGesture(
-                        modeState.value, pinchState.value, perDoubling,
+                    val outcome = touchGesture(
+                        down, modeState.value, pinchState.value,
+                        pxPerDoubling = OneFingerMath.pxPerDoubling(1.dp.toPx(), sensState.value),
+                        deadzonePx = 4.dp.toPx(),
+                        stillnessPx = 2.dp.toPx(),
+                        onBegin = {
+                            val bmp = liveBitmapState.value(idx)
+                            val c = projectState.value.cells[idx]
+                            if (bmp != null) live.begin(idx, c.zoom, c.cx, c.cy, bmp) else fallback = true
+                        },
                         onPan = { d ->
                             val r = rectsState.value[idx]
-                            onTransform(idx, d.x, d.y, 1f, 0.5f, 0.5f, r.w, r.h)
+                            if (fallback) onTransform(idx, d.x, d.y, 1f, 0.5f, 0.5f, r.w, r.h)
+                            else live.pan(d.x, d.y, imgAspect, r.w, r.h, fit)
                         },
                         onZoom = { factor, centroid ->
                             val r = rectsState.value[idx]
                             val fx = centroid?.let { ((it.x - r.l) / r.w).coerceIn(0f, 1f) } ?: 0.5f
                             val fy = centroid?.let { ((it.y - r.t) / r.h).coerceIn(0f, 1f) } ?: 0.5f
-                            onTransform(idx, 0f, 0f, factor, fx, fy, r.w, r.h)
+                            if (fallback) onTransform(idx, 0f, 0f, factor, fx, fy, r.w, r.h)
+                            else live.zoomBy(factor, fx, fy, imgAspect, r.w / r.h, fit)
                         },
-                        initialDelta = startDelta,
                     )
-                    if (moved) onGestureEnd()
+                    when (outcome) {
+                        GestureOutcome.MOVED -> {
+                            if (fallback) onGestureEnd()
+                            else if (live.active) {
+                                onCommitState.value(idx, live.zoom, live.cx, live.cy)
+                                live.markCommitted()
+                            }
+                        }
+                        GestureOutcome.TAP -> { live.clear(); if (fallback) onGestureEnd() }
+                        GestureOutcome.LONG_PRESS -> {
+                            live.clear()
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            dragFrom = idx; dragPos = start
+                            drag(down.id) { ch -> ch.consume(); dragPos = ch.position }
+                            val to = rectsState.value.indexOfFirst { it.contains(dragPos.x, dragPos.y) }
+                            dragFrom = null
+                            if (to >= 0 && to != idx) onSwap(idx, to)
+                        }
+                    }
                 }
             },
     ) {
@@ -160,9 +192,33 @@ fun CollageCanvas(
                 y += s; r++
             }
         }
-        frame?.let {
-            Image(it.bitmap.asImageBitmap(), null, Modifier.size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() }), contentScale = ContentScale.FillBounds)
+        // The rendered frame and the live layer share one offscreen layer so a transparent background can be cleared.
+        Box(Modifier.size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() }).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+            frame?.let {
+                Image(it.bitmap.asImageBitmap(), null, Modifier.size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() }), contentScale = ContentScale.FillBounds)
+            }
+            Canvas(Modifier.size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() })) {
+                // Reads live.* here, in the draw phase only: a touch event invalidates just this draw.
+                if (live.active) {
+                    val bmp = live.bitmap
+                    val p = projectState.value
+                    val base = p.cells.getOrNull(live.index)
+                    if (bmp != null && base != null) {
+                        val cell = base.copy(zoom = live.zoom, cx = live.cx, cy = live.cy)
+                        drawIntoCanvas { c -> renderer.drawCellLive(c.nativeCanvas, p, live.index, cell, bmp, widthPx, heightPx) }
+                    }
+                }
+            }
         }
+        // Remove the live layer once the committed project's frame is what is on screen.
+        val pending = live.commitPending
+        LaunchedEffect(frame, pending) {
+            if (pending && frame != null) {
+                val c = frame.forProject.cells.getOrNull(live.index)
+                if (c != null && c.zoom == live.zoom && c.cx == live.cx && c.cy == live.cy) live.clear()
+            }
+        }
+        LaunchedEffect(pending) { if (pending) { kotlinx.coroutines.delay(1500); live.clear() } }
         // selection and drag overlays
         Canvas(Modifier.size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() })) {
             selection.cell?.let { i ->
