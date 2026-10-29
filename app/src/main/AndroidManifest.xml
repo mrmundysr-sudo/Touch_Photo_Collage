@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Only needed to save into the gallery on Android 9 and older. Android 10+ needs no storage permission,
          and photos are chosen with the system photo picker. There is deliberately no INTERNET permission. -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+
+    <!-- The ML Kit libraries merge in INTERNET (for optional model downloads and telemetry). This app uses only the
+         bundled on-device model and promises to work fully offline, so the OS-level permission is removed. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
 
     <application
         android:allowBackup="false"

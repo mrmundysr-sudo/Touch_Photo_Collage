@@ -70,8 +70,9 @@ object ProjectJson {
 
     // ---- decode ----
 
+    // Static lookup (no reflection) so R8/ProGuard in release builds can never strip what it needs.
     private inline fun <reified E : Enum<E>> enumOf(name: String?, default: E): E =
-        runCatching { java.lang.Enum.valueOf(E::class.java, name ?: "") }.getOrDefault(default)
+        enumValues<E>().firstOrNull { it.name == name } ?: default
 
     private fun JSONObject.f(key: String, def: Float) = optDouble(key, def.toDouble()).toFloat()
 

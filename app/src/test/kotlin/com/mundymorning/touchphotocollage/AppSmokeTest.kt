@@ -55,6 +55,13 @@ class AppSmokeTest {
         throw AssertionError("timed out waiting for $what")
     }
 
+    @Test fun appRequestsNoInternetPermissionSoItCannotUseTheNetwork() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val info = app.packageManager.getPackageInfo(app.packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+        val perms = info.requestedPermissions?.toList() ?: emptyList()
+        assertTrue("INTERNET must not be requested (merged manifest): $perms", "android.permission.INTERNET" !in perms)
+    }
+
     @Test fun homeScreenShowsPrimaryActionsAndEmptyStates() {
         var created: ProjectMode? = null
         rule.setContent {

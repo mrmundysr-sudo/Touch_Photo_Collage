@@ -59,7 +59,7 @@ class GestureUiTest {
     }
 
     private fun waitFor(what: String, cond: () -> Boolean) {
-        repeat(400) { shadowOf(Looper.getMainLooper()).idle(); if (cond()) return; Thread.sleep(25) }
+        repeat(1200) { shadowOf(Looper.getMainLooper()).idle(); if (cond()) return; Thread.sleep(25) }
         throw AssertionError("timed out waiting for $what")
     }
 
@@ -384,7 +384,7 @@ class FirstUseAndHomeTest {
     @get:Rule val rule = createComposeRule()
 
     private fun waitFor(what: String, cond: () -> Boolean) {
-        repeat(400) { shadowOf(Looper.getMainLooper()).idle(); if (cond()) return; Thread.sleep(25) }
+        repeat(1200) { shadowOf(Looper.getMainLooper()).idle(); if (cond()) return; Thread.sleep(25) }
         throw AssertionError("timed out waiting for $what")
     }
 

@@ -13,4 +13,4 @@ store.save(project)                                                             
 ```
 Face-aware cropping: run `MlKitFaceFinder().find(ref, store.mediaDir)` off the main thread, then `ProjectOps.withFaces(project, ref.id, faces)`. Implement `FaceFinder` to use another detector.
 Share via `Exporter.prepareShare(project, req, "<applicationId>.fileprovider")` (declare a FileProvider with a `cache-path` `shared/`).
-Requirements: minSdk 26, ML Kit `face-detection` is pulled in transitively. No INTERNET permission needed.
+Requirements: minSdk 26, ML Kit `face-detection` is pulled in transitively. ML Kit merges the `INTERNET` permission into your manifest; if your app must work offline, remove it with `<uses-permission android:name="android.permission.INTERNET" tools:node="remove" />` (bundled-model detection needs no network).
