@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "TouchPhotoCollage"
-include(":app", ":collage-engine")
+include(":app", ":collage-engine", ":touch-gesture-standard")

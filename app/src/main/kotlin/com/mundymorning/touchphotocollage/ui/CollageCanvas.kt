@@ -4,10 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.gestures.calculateCentroid
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -31,7 +27,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -39,6 +37,11 @@ import com.mundymorning.collage.engine.model.FRect
 import com.mundymorning.collage.engine.project.BackgroundType
 import com.mundymorning.collage.engine.project.CollageProject
 import com.mundymorning.collage.engine.render.CollageRenderer
+import com.mundymorning.touchgesture.TouchMode
+import com.mundymorning.touchgesture.TouchStart
+import com.mundymorning.touchgesture.classifyTouchStart
+import com.mundymorning.touchgesture.label
+import com.mundymorning.touchgesture.oneFingerOrPinchGesture
 import com.mundymorning.touchphotocollage.PreviewFrame
 import com.mundymorning.touchphotocollage.Selection
 
@@ -59,6 +62,11 @@ fun CollageCanvas(
     onMoveText: (index: Int, nx: Float, ny: Float) -> Unit,
     onSwap: (Int, Int) -> Unit,
     onGestureEnd: () -> Unit,
+    mode: TouchMode,
+    pinchEnabled: Boolean,
+    onZoomStep: (Float) -> Unit,
+    onPanStep: (Float, Float) -> Unit,
+    onReset: () -> Unit,
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -66,6 +74,8 @@ fun CollageCanvas(
     val rectsState = rememberUpdatedState(rects)
     val frameState = rememberUpdatedState(frame)
     val projectState = rememberUpdatedState(project)
+    val modeState = rememberUpdatedState(mode)
+    val pinchState = rememberUpdatedState(pinchEnabled)
     var dragFrom by remember { mutableStateOf<Int?>(null) }
     var dragPos by remember { mutableStateOf(Offset.Zero) }
     val primary = MaterialTheme.colorScheme.primary
@@ -74,7 +84,18 @@ fun CollageCanvas(
 
     Box(
         Modifier.size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() }).clipToBounds()
-            .semantics { contentDescription = "Collage preview with ${project.photoCount} photos. Drag a photo to reposition, pinch to zoom, long press and drop onto another photo to swap." }
+            .semantics {
+                contentDescription = "Collage preview with ${project.photoCount} photos. Current touch mode: ${mode.label}. Long press a photo and drop it onto another to swap."
+                customActions = listOf(
+                    CustomAccessibilityAction("Zoom in on selected photo") { onZoomStep(1.25f); true },
+                    CustomAccessibilityAction("Zoom out on selected photo") { onZoomStep(0.8f); true },
+                    CustomAccessibilityAction("Move selected photo left") { onPanStep(-0.1f, 0f); true },
+                    CustomAccessibilityAction("Move selected photo right") { onPanStep(0.1f, 0f); true },
+                    CustomAccessibilityAction("Move selected photo up") { onPanStep(0f, -0.1f); true },
+                    CustomAccessibilityAction("Move selected photo down") { onPanStep(0f, 0.1f); true },
+                    CustomAccessibilityAction("Reset selected photo position") { onReset(); true },
+                )
+            }
             .pointerInput(widthPx, heightPx) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -98,32 +119,34 @@ fun CollageCanvas(
                     val cell = projectState.value.cells.getOrNull(idx)
                     if (cell?.photo == null) return@awaitEachGesture
 
-                    val longPress = awaitLongPressOrCancellation(down.id)
-                    if (longPress != null) {
+                    var startDelta = Offset.Zero
+                    val kind = classifyTouchStart(down) { startDelta = it }
+                    if (kind == TouchStart.TAP) return@awaitEachGesture
+                    if (kind == TouchStart.LONG_PRESS) {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        dragFrom = idx; dragPos = longPress.position
-                        drag(longPress.id) { ch -> ch.consume(); dragPos = ch.position }
+                        dragFrom = idx; dragPos = start
+                        drag(down.id) { ch -> ch.consume(); dragPos = ch.position }
                         val to = rectsState.value.indexOfFirst { it.contains(dragPos.x, dragPos.y) }
                         dragFrom = null
                         if (to >= 0 && to != idx) onSwap(idx, to)
                         return@awaitEachGesture
                     }
-                    // pan / pinch inside the cell
-                    var moved = false
-                    do {
-                        val event = awaitPointerEvent()
-                        val zoom = event.calculateZoom()
-                        val pan = event.calculatePan()
-                        if (zoom != 1f || pan != Offset.Zero) {
+                    // one-finger PAN / ZOOM (Touch Gesture Standard) or optional pinch
+                    val perDoubling = 160.dp.toPx()
+                    val moved = oneFingerOrPinchGesture(
+                        modeState.value, pinchState.value, perDoubling,
+                        onPan = { d ->
                             val r = rectsState.value[idx]
-                            val c = event.calculateCentroid(useCurrent = false)
-                            val fx = if (c.isSpecified) ((c.x - r.l) / r.w).coerceIn(0f, 1f) else 0.5f
-                            val fy = if (c.isSpecified) ((c.y - r.t) / r.h).coerceIn(0f, 1f) else 0.5f
-                            onTransform(idx, pan.x, pan.y, zoom, fx, fy, r.w, r.h)
-                            moved = true
-                            event.changes.forEach { if (it.positionChanged()) it.consume() }
-                        }
-                    } while (event.changes.any { it.pressed })
+                            onTransform(idx, d.x, d.y, 1f, 0.5f, 0.5f, r.w, r.h)
+                        },
+                        onZoom = { factor, centroid ->
+                            val r = rectsState.value[idx]
+                            val fx = centroid?.let { ((it.x - r.l) / r.w).coerceIn(0f, 1f) } ?: 0.5f
+                            val fy = centroid?.let { ((it.y - r.t) / r.h).coerceIn(0f, 1f) } ?: 0.5f
+                            onTransform(idx, 0f, 0f, factor, fx, fy, r.w, r.h)
+                        },
+                        initialDelta = startDelta,
+                    )
                     if (moved) onGestureEnd()
                 }
             },

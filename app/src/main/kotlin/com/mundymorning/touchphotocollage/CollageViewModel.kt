@@ -21,6 +21,8 @@ import com.mundymorning.collage.engine.project.*
 import com.mundymorning.collage.engine.render.CollageRenderer
 import com.mundymorning.collage.engine.transform.CropMath
 import com.mundymorning.collage.engine.transform.Orientation
+import com.mundymorning.touchgesture.GestureSettings
+import com.mundymorning.touchgesture.TouchMode
 import com.mundymorning.touchphotocollage.ui.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -90,6 +92,13 @@ class CollageViewModel(private val app: Application) : AndroidViewModel(app) {
         runCatching { ThemeMode.valueOf(prefs.getString("theme", "SYSTEM")!!) }.getOrDefault(ThemeMode.SYSTEM),
     )
     val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
+    private val gestureSettings = GestureSettings(prefs)
+    private val _touchMode = MutableStateFlow(gestureSettings.mode)
+    val touchMode: StateFlow<TouchMode> = _touchMode.asStateFlow()
+    private val _pinchEnabled = MutableStateFlow(gestureSettings.pinchEnabled)
+    val pinchEnabled: StateFlow<Boolean> = _pinchEnabled.asStateFlow()
+    private val _introSeen = MutableStateFlow(gestureSettings.introSeen)
+    val introSeen: StateFlow<Boolean> = _introSeen.asStateFlow()
     private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
 
@@ -142,6 +151,10 @@ class CollageViewModel(private val app: Application) : AndroidViewModel(app) {
         _theme.value = mode
         prefs.edit().putString("theme", mode.name).apply()
     }
+
+    fun setTouchMode(m: TouchMode) { _touchMode.value = m; gestureSettings.mode = m }
+    fun setPinchEnabled(on: Boolean) { _pinchEnabled.value = on; gestureSettings.pinchEnabled = on }
+    fun markIntroSeen() { _introSeen.value = true; gestureSettings.introSeen = true }
 
     fun deleteProject(id: String) {
         viewModelScope.launch {
@@ -346,6 +359,16 @@ class CollageViewModel(private val app: Application) : AndroidViewModel(app) {
             }
             p.copy(cells = p.cells.mapIndexed { i, cell -> if (i == index) cell.copy(zoom = z, cx = cx, cy = cy, manual = true) else cell })
         }
+    }
+
+    /** One discrete move/zoom step (TalkBack actions, keyboards). Pan is a fraction of the cell size. */
+    fun stepCell(index: Int, panFracX: Float, panFracY: Float, zoomFactor: Float) {
+        val p = _project.value ?: return
+        val (cw, ch) = _canvasPx.value
+        if (cw <= 0) return
+        val r = CollageRenderer.cellRects(p, cw, ch).getOrNull(index) ?: return
+        transformCell(index, panFracX * r.w, panFracY * r.h, zoomFactor, 0.5f, 0.5f, r.w, r.h)
+        endLive()
     }
 
     fun swapCells(a: Int, b: Int) {

@@ -6,6 +6,7 @@ Offline, private photo collage maker for Android (Kotlin, Jetpack Compose). Mund
 - **Layouts:** 1 to 30 photos; rows, columns, grids, feature layouts, pinwheel and artistic mosaics; side-by-side / stacked comparisons; any canvas ratio.
 - **Style:** spacing, margin, rounded corners, photo borders; colour, gradient, textured or transparent backgrounds.
 - **Smart positioning:** on-device face detection keeps faces in frame; *Family Resemblance* aligns faces to the same size and height; never distorts; pinch/drag overrides; rotate, mirror; "never crop" mode.
+- **One-finger editing:** PAN / ZOOM / RESET buttons (slide up to zoom in, down to zoom out), optional pinch, remembered between sessions. See [docs/TOUCH-GESTURE-STANDARD.md](docs/TOUCH-GESTURE-STANDARD.md).
 - **Editor:** brightness, contrast, saturation, warmth, sharpness, filters, text overlays, captions, undo/redo, projects autosave and reopen. Non-destructive.
 - **Export:** JPEG/PNG, standard or maximum resolution, save to gallery or share sheet, transparent PNG.
 - **Privacy:** no internet permission, no accounts, no cloud. Photos are chosen with the system photo picker.

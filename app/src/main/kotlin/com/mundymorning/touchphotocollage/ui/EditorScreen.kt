@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -58,6 +59,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mundymorning.collage.engine.project.ProjectMode
+import com.mundymorning.touchgesture.GestureIntroDialog
+import com.mundymorning.touchgesture.GestureModeBar
+import com.mundymorning.touchgesture.glyph
+import com.mundymorning.touchgesture.label
 import com.mundymorning.touchphotocollage.CollageViewModel
 
 private enum class Tab(val label: String, val glyph: String) {
@@ -73,6 +78,10 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
     val canRedo by vm.canRedo.collectAsState()
     val canvasPx by vm.canvasPx.collectAsState()
     val facesPending by vm.facesPending.collectAsState()
+    val touchMode by vm.touchMode.collectAsState()
+    val pinch by vm.pinchEnabled.collectAsState()
+    val introSeen by vm.introSeen.collectAsState()
+    var help by remember { mutableStateOf(false) }
     val p = project ?: return
 
     var tab by rememberSaveable { mutableStateOf(if (p.mode == ProjectMode.FAMILY) Tab.FACES else Tab.LAYOUT) }
@@ -118,8 +127,20 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
                         onSelectCell = vm::selectCell, onSelectText = vm::selectText,
                         onTransform = { i, px, py, z, fx, fy, w, h -> vm.transformCell(i, px, py, z, fx, fy, w, h) },
                         onMoveText = vm::moveText, onSwap = vm::swapCells, onGestureEnd = vm::endLive,
+                        mode = touchMode, pinchEnabled = pinch,
+                        onZoomStep = { f -> selection.cell?.let { vm.stepCell(it, 0f, 0f, f) } },
+                        onPanStep = { dx, dy -> selection.cell?.let { vm.stepCell(it, dx, dy, 1f) } },
+                        onReset = { selection.cell?.let { vm.resetCell(it) } },
                     )
                 }
+            }
+            val selCell = selection.cell?.let { p.cells.getOrNull(it) }?.takeIf { it.photo != null }
+            if (selCell != null) {
+                Text(
+                    "${touchMode.glyph} ${touchMode.label}  ×${"%.1f".format(selCell.zoom)}", style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.align(Alignment.TopStart).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary).padding(horizontal = 12.dp, vertical = 6.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
             }
             if (facesPending > 0) {
                 Text(
@@ -129,6 +150,15 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
                 )
             }
         }
+
+        // ---- one-finger controls (Touch Gesture Standard)
+        val selectedCell = selection.cell?.let { p.cells.getOrNull(it) }?.takeIf { it.photo != null }
+        GestureModeBar(
+            mode = touchMode, onModeChange = vm::setTouchMode, onReset = { selection.cell?.let { vm.resetCell(it) } },
+            hasTarget = selectedCell != null, onHelp = { help = true },
+            zoomLabel = selectedCell?.let { "×${"%.1f".format(it.zoom)}" },
+        )
+        Spacer(Modifier.height(4.dp))
 
         // ---- selected photo tools
         AnimatedVisibility(selection.cell != null && p.cells.getOrNull(selection.cell ?: -1)?.photo != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
@@ -166,7 +196,7 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
                 }
             }
             if (panelOpen) {
-                Column(Modifier.fillMaxWidth().heightIn(max = 232.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
                     when (tab) {
                         Tab.LAYOUT -> {
                             LayoutPanel(vm, p)
@@ -180,6 +210,10 @@ fun EditorScreen(vm: CollageViewModel, onExport: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (!introSeen || help) {
+        GestureIntroDialog(pinch, vm::setPinchEnabled) { vm.markIntroSeen(); help = false }
     }
 
     if (renaming) {

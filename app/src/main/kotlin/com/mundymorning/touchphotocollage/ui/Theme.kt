@@ -2,11 +2,14 @@ package com.mundymorning.touchphotocollage.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -74,5 +77,10 @@ fun AppTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -> Unit
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    MaterialTheme(colorScheme = if (dark) Dark else Light, typography = AppTypography, shapes = AppShapes, content = content)
+    val scheme = if (dark) Dark else Light
+    MaterialTheme(colorScheme = scheme, typography = AppTypography, shapes = AppShapes) {
+        // Text outside a Surface defaults to black; this root surface gives every screen the right content colour
+        // (fixes dark text on dark backgrounds).
+        Surface(Modifier.fillMaxSize(), color = scheme.background, contentColor = scheme.onBackground, content = content)
+    }
 }

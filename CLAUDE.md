@@ -10,6 +10,7 @@ the owner's explicit approval. APK delivery standard: autobuild/APK-DELIVERY.md 
 ## Layout
 - `collage-engine/` reusable Android library (no UI): layout, crop math, face-aware cropping, rendering, export, project storage.
 - `app/` Compose UI (home, editor, export sheet) + `CollageViewModel`.
+- `touch-gesture-standard/` reusable one-finger PAN/ZOOM standard (math, settings, gesture loop, UI); spec in `docs/TOUCH-GESTURE-STANDARD.md`.
 - `docs/` architecture and integration guide.
 
 ## Rules

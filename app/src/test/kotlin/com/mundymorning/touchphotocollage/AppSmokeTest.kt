@@ -74,6 +74,7 @@ class AppSmokeTest {
         val dir = File(app.cacheDir, "smoke").apply { mkdirs() }
         val uris = listOf(photo(dir, "a.jpg", 600, 800, Color.rgb(200, 90, 60)), photo(dir, "b.jpg", 800, 600, Color.rgb(60, 120, 200)), photo(dir, "c.jpg", 500, 500, Color.rgb(70, 160, 90)))
         val vm = CollageViewModel(app)
+        vm.markIntroSeen()
         vm.startNew(ProjectMode.FAMILY, uris)
         waitFor("editor") { vm.screen.value == Screen.EDITOR && vm.project.value != null }
         assertEquals(3, vm.project.value!!.photoCount)
