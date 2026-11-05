@@ -36,7 +36,7 @@ struct ExportSheet: View {
                             SelectChip("\(q.label) · \(qw) × \(qh)", quality == q) { quality = q }
                         }
                     }
-                    Text("\(w) × \(h) pixels · \(format == .jpeg ? "JPEG \(quality.jpegQuality)%" : "PNG")")
+                    Text(verbatim: "\(w) × \(h) pixels · \(format == .jpeg ? "JPEG \(quality.jpegQuality)%" : "PNG")")
                         .font(.bodyMedium).foregroundColor(Palette.onSurfaceVariant).accessibilityIdentifier("exportSummary")
                     if format == .png {
                         HStack {

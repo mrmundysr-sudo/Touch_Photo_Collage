@@ -41,6 +41,7 @@ enum UITestSupport {
     static var seedPhotos: Bool { args.contains("-UITestSeed") }
     static var reset: Bool { args.contains("-UITestReset") }
     static var introSeen: Bool { args.contains("-UITestIntroSeen") }
+    static let gestureKeys = ["touch_gesture_mode", "touch_gesture_pinch", "touch_gesture_zoom_sensitivity", "touch_gesture_frame_timing", "touch_gesture_intro_seen"]
     static var theme: ThemeMode? {
         guard let i = args.firstIndex(of: "-UITestTheme"), i + 1 < args.count else { return nil }
         return ThemeMode(rawValue: args[i + 1].uppercased())
@@ -108,6 +109,7 @@ final class AppModel: ObservableObject {
         let base = root ?? AppModel.defaultRoot()
         if UITestSupport.reset { try? FileManager.default.removeItem(at: base) }
         let st = ProjectStore(root: base)
+        if UITestSupport.reset { for k in UITestSupport.gestureKeys { UserDefaults.standard.removeObject(forKey: k) } }
         let gs = GestureSettings(defaults: .standard)
         if UITestSupport.introSeen { gs.introSeen = true }
         let cacheBytes = Int(min(ProcessInfo.processInfo.physicalMemory / 8, 512 * 1024 * 1024))

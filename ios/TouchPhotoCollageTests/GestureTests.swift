@@ -24,7 +24,7 @@ final class OneFingerMathTests: XCTestCase {
     func testTravelIsTheInverseOfFactor() {
         for f in [0.25, 0.7, 1.0, 1.9, 6.0] {
             let t = OneFingerMath.travelFor(factor: f, pxPerDoubling: 160)
-            XCTAssertEqual(OneFingerMath.zoomFactor(dy: -t, pxPerDoubling: 160), f, accuracy: 1e-9)
+            XCTAssertEqual(OneFingerMath.zoomFactor(dy: t, pxPerDoubling: 160), f, accuracy: 1e-9, "travel is the finger's dy that produces the factor")
         }
     }
 
