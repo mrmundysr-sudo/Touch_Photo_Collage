@@ -90,7 +90,7 @@ struct GestureModeBar: View {
                 if hasTarget, let z = zoomLabel { z }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading) // room for two lines, so switching modes never resizes the canvas
             .foregroundColor(hasTarget ? Palette.onPrimaryContainer : Palette.onSurfaceVariant)
             .background(RoundedRectangle(cornerRadius: 12).fill(hasTarget ? Palette.primaryContainer : Palette.surfaceVariant))
         }

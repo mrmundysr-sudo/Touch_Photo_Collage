@@ -30,9 +30,8 @@ final class DrawLayer: CALayer {
     var drawHandler: ((CGContext, CGRect) -> Void)?
 
     override func draw(in ctx: CGContext) {
-        // CALayer contexts are y-up; the app draws y-down like the Android canvas.
-        ctx.translateBy(x: 0, y: bounds.height)
-        ctx.scaleBy(x: 1, y: -1)
+        // On iOS a UIView-hosted layer already hands us a top-left-origin (y-down) context, which is what the renderer and
+        // every overlay expect: no flip here (flipping it again drew the selection outline upside down).
         drawHandler?(ctx, bounds)
     }
 }

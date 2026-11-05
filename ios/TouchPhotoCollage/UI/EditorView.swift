@@ -212,7 +212,9 @@ struct EditorView: View {
                 hasTarget: selected != nil, onHelp: { help = true },
                 zoomLabel: selected.flatMap { c in selIndex.map { AnyView(ZoomReadout(live: model.live, cell: $0, committedZoom: c.zoom)) } }
             )
-            if let i = selIndex, let cell = selected {
+            // The row's height is always reserved, so selecting a photo never resizes the canvas under the finger.
+            ZStack {
+                if let i = selIndex, let cell = selected {
                 ChipRow {
                     ToolChip(symbol: "rotate.right", label: "Rotate") { model.rotateCell(i) }
                     ToolChip(symbol: "arrow.left.and.right.righttriangle.left.righttriangle.right", label: "Mirror") { model.mirrorCell(i) }
@@ -225,6 +227,8 @@ struct EditorView: View {
                 }
                 .padding(.horizontal, 12)
             }
+            }
+            .frame(height: 48)
             tabsAndPanel(p, panelHeight: panelHeight)
         }
         .padding(.top, 4)

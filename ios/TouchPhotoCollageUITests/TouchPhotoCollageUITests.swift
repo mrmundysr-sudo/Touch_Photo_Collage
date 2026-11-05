@@ -43,7 +43,8 @@ final class TouchPhotoCollageUITests: XCTestCase {
     }
 
     private func shot(_ name: String) {
-        let s = XCUIScreen.main.screenshot()
+        // XCUIScreen captures in the device's native (portrait) orientation; the app screenshot follows interface rotation.
+        let s = XCUIDevice.shared.orientation.isLandscape ? app.screenshot() : XCUIScreen.main.screenshot()
         let att = XCTAttachment(screenshot: s)
         att.name = name
         att.lifetime = .keepAlways
