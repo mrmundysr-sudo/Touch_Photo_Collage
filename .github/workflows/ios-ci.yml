@@ -1,0 +1,152 @@
+# Touch Photo Collage for iOS: simulator build, unit tests, UI tests and screenshots.
+# This workflow never signs anything and uses no secrets or Apple credentials: it builds for the simulator and
+# compiles (without signing) for a device. The TestFlight upload is handled separately by the owner's launcher.
+name: iOS CI (simulator, no signing)
+
+on:
+  push:
+    branches: ["claude/ios-**"]
+    paths: ["ios/**", ".github/workflows/ios-ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # only used to commit refreshed simulator screenshots back to the same branch
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT: ios/TouchPhotoCollage.xcodeproj
+  SCHEME: TouchPhotoCollage
+  BUNDLE_ID: com.mundymorning.touchphotocollage
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          swift --version
+          xcrun simctl list runtimes
+
+      - name: Pick simulators
+        id: sim
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, subprocess, re
+          data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))["devices"]
+          def ver(rt):
+              m = re.search(r"iOS-(\d+)-(\d+)", rt)
+              return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+          runtimes = sorted([r for r in data if "iOS" in r], key=ver)
+          best = runtimes[-1]
+          phones = [d for d in data[best] if d["name"].startswith("iPhone")]
+          def pick(pred):
+              for d in phones:
+                  if pred(d["name"]): return d
+              return None
+          main = pick(lambda n: "Pro" in n and "Max" not in n) or phones[0]
+          small = pick(lambda n: "SE" in n) or pick(lambda n: n.endswith("mini")) or None
+          print(f"main={main['udid']}")
+          print(f"main_name={main['name']} ({best})")
+          print(f"small={small['udid'] if small else ''}")
+          print(f"small_name={small['name'] if small else ''}")
+          PY
+
+      - name: Build for iPhone hardware (no signing)
+        run: |
+          set -o pipefail
+          xcodebuild build -project "$PROJECT" -scheme "$SCHEME" -sdk iphoneos -configuration Release \
+            -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee build-device.log | tail -n 40
+
+      - name: Prepare simulator
+        run: |
+          UDID="${{ steps.sim.outputs.main }}"
+          echo "Using ${{ steps.sim.outputs.main_name }}"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          # the CI job pre-grants add-only photo access so the save flow can be exercised end to end
+          xcrun simctl privacy "$UDID" grant photos-add "$BUNDLE_ID" || true
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard 0 || true
+
+      - name: Unit and UI tests on ${{ steps.sim.outputs.main_name }}
+        run: |
+          set -o pipefail
+          mkdir -p build/screenshots
+          export TEST_RUNNER_SCREENSHOT_DIR="$PWD/build/screenshots"
+          xcodebuild test -project "$PROJECT" -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.main }}" \
+            -resultBundlePath build/results.xcresult -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+            | tee build/xcodebuild.log
+
+      - name: Small-screen check (${{ steps.sim.outputs.small_name }})
+        if: ${{ !cancelled() && steps.sim.outputs.small != '' }}
+        run: |
+          set -o pipefail
+          UDID="${{ steps.sim.outputs.small }}"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl privacy "$UDID" grant photos-add "$BUNDLE_ID" || true
+          export TEST_RUNNER_SCREENSHOT_DIR="$PWD/build/screenshots"
+          export TEST_RUNNER_SCREENSHOT_SUFFIX="-small"
+          xcodebuild test -project "$PROJECT" -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -resultBundlePath build/results-small.xcresult -parallel-testing-enabled NO \
+            -only-testing:TouchPhotoCollageUITests/TouchPhotoCollageUITests/testHomeShowsPrivacyNoteAndCreatesACollage \
+            -only-testing:TouchPhotoCollageUITests/TouchPhotoCollageUITests/testOneFingerPanAndZoomWorkAndDoNotFightSelection \
+            -only-testing:TouchPhotoCollageUITests/TouchPhotoCollageUITests/testEditingPanelsLayoutStyleAdjustTextFaces \
+            CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+            | tee build/xcodebuild-small.log | tail -n 60
+
+      - name: Test summary
+        if: always()
+        run: |
+          for r in build/results.xcresult build/results-small.xcresult; do
+            [ -e "$r" ] || continue
+            echo "=== $r"
+            xcrun xcresulttool get test-results summary --path "$r" --compact 2>/dev/null | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          print({k:d.get(k) for k in ("result","passedTests","failedTests","skippedTests","totalTestCount")})
+          for f in d.get("testFailures",[]): print("FAIL:", f.get("testName"), "-", f.get("failureText"))
+          ' || true
+          done
+          grep -E "error:|\*\* TEST|Test Case .* failed|Executed [0-9]+ tests" build/xcodebuild.log | head -n 80 || true
+
+      - name: Collect screenshots
+        if: always()
+        run: |
+          mkdir -p ios/docs/screenshots
+          ls build/screenshots 2>/dev/null | head -n 80 || true
+          cp build/screenshots/*.png ios/docs/screenshots/ 2>/dev/null || true
+
+      - name: Commit refreshed screenshots
+        if: always() && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ios/docs/screenshots
+          if git diff --cached --quiet; then echo "no screenshot changes"; else
+            git commit -m "ios: refresh simulator screenshots [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}" || echo "push of screenshots failed (non-fatal)"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: ios-test-results
+          path: |
+            build/results.xcresult
+            build/results-small.xcresult
+            build/screenshots
+            build/xcodebuild.log
+          retention-days: 14
